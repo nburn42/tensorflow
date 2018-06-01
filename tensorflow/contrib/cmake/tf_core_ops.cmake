@@ -15,8 +15,9 @@
 set(tf_op_lib_names
     "audio_ops"
     "array_ops"
-		"batch_ops"
+    "batch_ops"
     "bitwise_ops"
+    "boosted_trees_ops"
     "candidate_sampling_ops"
     "checkpoint_ops"
     "control_flow_ops"
@@ -24,11 +25,13 @@ set(tf_op_lib_names
     "cudnn_rnn_ops"
     "data_flow_ops"
     "dataset_ops"
+    "decode_proto_ops"
+    "encode_proto_ops"
     "functional_ops"
     "image_ops"
     "io_ops"
     "linalg_ops"
-		"list_ops"
+    "list_ops"
     "lookup_ops"
     "logging_ops"
     "manip_ops"
@@ -39,6 +42,7 @@ set(tf_op_lib_names
     "random_ops"
     "remote_fused_graph_ops"
     "resource_variable_ops"
+    "rpc_ops"
     "script_ops"
     "sdca_ops"
     "set_ops"
@@ -48,7 +52,7 @@ set(tf_op_lib_names
     "state_ops"
     "stateless_random_ops"
     "string_ops"
-		"summary_ops"
+    "summary_ops"
     "training_ops"
 )
 
@@ -109,6 +113,7 @@ GENERATE_CONTRIB_OP_LIBRARY(tensor_forest_stats "${tensorflow_source_dir}/tensor
 GENERATE_CONTRIB_OP_LIBRARY(text_skip_gram "${tensorflow_source_dir}/tensorflow/contrib/text/ops/skip_gram_ops.cc")
 GENERATE_CONTRIB_OP_LIBRARY(tpu "${tpu_ops_srcs}")
 GENERATE_CONTRIB_OP_LIBRARY(bigquery_reader "${tensorflow_source_dir}/tensorflow/contrib/cloud/ops/bigquery_reader_ops.cc")
+GENERATE_CONTRIB_OP_LIBRARY(gcs_config "${tensorflow_source_dir}/tensorflow/contrib/cloud/ops/gcs_config_ops.cc")
 GENERATE_CONTRIB_OP_LIBRARY(reduce_slice_ops "${tensorflow_source_dir}/tensorflow/contrib/reduce_slice_ops/ops/reduce_slice_ops.cc")
 
 ########################################################

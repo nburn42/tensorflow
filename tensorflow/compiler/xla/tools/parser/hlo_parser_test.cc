@@ -18,6 +18,7 @@ limitations under the License.
 #include <string>
 #include "tensorflow/core/lib/core/status_test_util.h"
 #include "tensorflow/core/lib/core/stringpiece.h"
+#include "tensorflow/core/lib/strings/str_util.h"
 #include "tensorflow/core/platform/test.h"
 
 namespace xla {
@@ -64,7 +65,7 @@ ENTRY %axpy.v5 (alpha: f32[], x: f32[2,4], y: f32[2,4]) -> f32[2,4] {
 R"(HloModule constant_pred_module
 
 ENTRY %constant_pred () -> pred[] {
-  ROOT %constant = pred[] constant(true), metadata={op_type="const" op_name="\"it\'s not a problem\n" source_file="path/to/test.cc" source_line=68}
+  ROOT %constant = pred[] constant(true), metadata={op_type="const" op_name="\"it\'s not a problem\n" source_file="path/to/test.cc" source_line=68}, backend_config="foo\" bar"
 }
 
 )"
@@ -80,13 +81,14 @@ ENTRY %constant_s32 () -> s32[] {
 
 )"
 },
-// f32 constant, but the value is not a decimal
+// f32 constant, but the value is not a decimal and there is a backend
+// configuration
 {
 "ConstantF32",
 R"(HloModule ConstantF32_module
 
 ENTRY %ConstantF32.v4 () -> f32[] {
-  ROOT %constant = f32[] constant(42)
+  ROOT %constant = f32[] constant(42), backend_config="this is a configuration"
 }
 
 )"
@@ -894,7 +896,7 @@ class HloParserTest : public ::testing::Test,
                       public ::testing::WithParamInterface<TestData> {
  protected:
   static void ExpectHasSubstr(StringPiece s, StringPiece expected) {
-    EXPECT_TRUE(StringPiece(s).contains(expected))
+    EXPECT_TRUE(tensorflow::str_util::StrContains(s, expected))
         << "'" << s << "' does not contain '" << expected << "'";
   }
 
@@ -936,13 +938,13 @@ INSTANTIATE_TEST_CASE_P(HloParserTestSuccessInstantiation, HloParserShortTest,
 TEST_F(HloParserTest, Empty) {
   const string original = "";
   auto result = Parse(original);
-  EXPECT_NE(tensorflow::Status::OK(), result.status());
+  EXPECT_NE(Status::OK(), result.status());
 }
 
 TEST_F(HloParserTest, Garbage) {
   const string original = "HloModule thi$ str1ng makes# N0 sen$e @all!*&^%$";
   auto result = Parse(original);
-  EXPECT_NE(tensorflow::Status::OK(), result.status());
+  EXPECT_NE(Status::OK(), result.status());
 }
 
 TEST_F(HloParserTest, WrongOpcode) {
@@ -956,7 +958,7 @@ ENTRY %blabla (x: f32[], y: f32[]) -> f32[] {
 
 )";
   auto result = Parse(original);
-  EXPECT_NE(tensorflow::Status::OK(), result.status());
+  EXPECT_NE(Status::OK(), result.status());
 }
 
 TEST_F(HloParserTest, WrongShape) {
@@ -968,7 +970,7 @@ ENTRY %blabla (x: g32[]) -> g32[] {
 
 )";
   auto result = Parse(original);
-  EXPECT_NE(tensorflow::Status::OK(), result.status());
+  EXPECT_NE(Status::OK(), result.status());
 }
 
 TEST_F(HloParserTest, WrongOperandsSize) {
@@ -981,7 +983,7 @@ ENTRY %blabla (x: f32[]) -> pred[] {
 
 )";
   auto result = Parse(original);
-  EXPECT_NE(tensorflow::Status::OK(), result.status());
+  EXPECT_NE(Status::OK(), result.status());
 }
 
 TEST_F(HloParserTest, OperandNotFound) {
@@ -992,7 +994,7 @@ ENTRY %blabla (x: f32[]) -> pred[] {
 }
 )";
   auto result = Parse(original);
-  EXPECT_NE(tensorflow::Status::OK(), result.status());
+  EXPECT_NE(Status::OK(), result.status());
 }
 
 TEST_F(HloParserTest, MoreConstants) {
@@ -1012,6 +1014,19 @@ ENTRY %SelectScalarS32True.v4 () -> s32[] {
   // but the constant names will not be exactly the same.
 }
 
+TEST_F(HloParserTest, ConfigurationField) {
+  const string original = R"(HloModule AModule
+ENTRY %configuration_test() -> s32[] {
+  %constant = s32[] constant(42), backend_config="foo bar"
+})";
+  auto result = Parse(original);
+  TF_ASSERT_OK(result.status());
+  EXPECT_EQ("foo bar", result.ValueOrDie()
+                           ->entry_computation()
+                           ->root_instruction()
+                           ->backend_config());
+}
+
 TEST_F(HloParserTest, LiteralDimensionsMismatch_1) {
   const string original = R"(HloModule some_2_module
 
@@ -1021,7 +1036,7 @@ ENTRY %some_2 () -> f32[2] {
 
 )";
   auto result = Parse(original);
-  EXPECT_NE(tensorflow::Status::OK(), result.status());
+  EXPECT_NE(Status::OK(), result.status());
   ExpectHasSubstr(result.status().error_message(),
                   "expects nested array in rank 1, but sees larger");
 }
@@ -1035,7 +1050,7 @@ ENTRY %some_2x3 () -> f32[2,3] {
 
 )";
   auto result = Parse(original);
-  EXPECT_NE(tensorflow::Status::OK(), result.status());
+  EXPECT_NE(Status::OK(), result.status());
   ExpectHasSubstr(result.status().error_message(),
                   "expects nested array in rank 2, but sees 1");
 }
@@ -1049,7 +1064,7 @@ ENTRY %some_2x3x2 () -> f32[2,3,2] {
 
 )";
   auto result = Parse(original);
-  EXPECT_NE(tensorflow::Status::OK(), result.status());
+  EXPECT_NE(Status::OK(), result.status());
   ExpectHasSubstr(result.status().error_message(),
                   "expects 3 elements in the [0]th element");
 }
@@ -1064,7 +1079,7 @@ ENTRY %ConstantF16Overflow.v4 () -> f16[] {
 
 )";
   auto result = Parse(original);
-  EXPECT_NE(tensorflow::Status::OK(), result.status());
+  EXPECT_NE(Status::OK(), result.status());
   ExpectHasSubstr(result.status().error_message(),
                   "is out of range for literal's primitive type F16");
 }
@@ -1091,7 +1106,7 @@ ENTRY %Convolve1D1Window_0.v3 (input: f32[1,2,1], filter: f32[1,1,1]) -> f32[1,2
   %input = f32[1,2,1]{2,1,0} parameter(0)
   %copy = f32[1,2,1]{2,0,1} copy(f32[1,2,1]{2,1,0} %input)
   %filter = f32[1,1,1]{2,1,0} parameter(1)
-  ROOT %convolution = f32[1,2,1]{2,0,1} convolution(f32[1,2,1]{2,0,1} %copy, f32[1,1,1]{2,1,0} %filter), sharding={maximal device=1}, dim_labels=b0f_0io->b0f, window={pad=1_1 size=2}
+  ROOT %convolution = f32[1,2,1]{2,0,1} convolution(f32[1,2,1]{2,0,1} %copy, f32[1,1,1]{2,1,0} %filter), sharding={maximal device=1}, backend_config="foo", dim_labels=b0f_0io->b0f, window={pad=1_1 size=2}
 }
 
 )";
@@ -1137,7 +1152,7 @@ ENTRY %TwoSendRecvBothWayRecvFist.v3 () -> f32[] {
 
 )";
   ExpectHasSubstr(Parse(original).status().error_message(),
-                  "unexpected attribute calls");
+                  "unexpected attribute \"calls\"");
 }
 
 TEST_F(HloParserTest, MissingAttribute) {
@@ -1238,7 +1253,7 @@ ENTRY %Reduce (input: f32[8,16,256]) -> f32[8,16] {
 
   auto module = Parse(original);
   TF_ASSERT_OK(module.status());
-  auto program_layout = module.ValueOrDie()->entry_computation_layout();
+  auto program_layout = module.ValueOrDie()->host_entry_computation_layout();
   ASSERT_EQ(program_layout.parameter_count(), 1);
   auto param_layout = program_layout.parameter_layout(0).layout();
   auto result_layout = program_layout.result_layout().layout();
@@ -1299,21 +1314,6 @@ ENTRY consts {
                   "one computation should have only one ROOT");
 }
 
-TEST_F(HloParserTest, InstructionExists) {
-  const string original = R"(HloModule comp_exists
-c1 {
-  instr = f32[1]{0} constant({12345})
-}
-c2 {
-  instr = f32[1]{0} constant({67890})
-})";
-
-  ExpectHasSubstr(Parse(original).status().error_message(),
-                  R"(was parsing 3:3: error: instruction previously defined here
-  instr = f32[1]{0} constant({12345})
-  ^)");
-}
-
 TEST_F(HloParserTest, ComputationExists) {
   const string original = R"(HloModule comp_exists
 comp {
@@ -1326,6 +1326,27 @@ comp {
                   R"(was parsing 2:1: error: computation previously defined here
 comp {
 ^)");
+}
+
+TEST_F(HloParserTest, CrossComputationLookup) {
+  const string original = R"(HloModule cross_computation_lookup:
+tcalla (a: (s32[], s32[])) -> (s32[], s32[]) {
+  ROOT aparam = (s32[], s32[]) parameter(0)
+}
+
+tcallb (b: (s32[], s32[])) -> s32[] {
+  rparam = (s32[], s32[]) parameter(0)
+  ROOT gte0 = s32[] get-tuple-element(aparam), index=0
+}
+
+ENTRY entry {
+  param = (s32[], s32[]) parameter(0)
+  call0 = (s32[], s32[]) call(param), to_apply=tcalla
+  ROOT call1 = s32[] call(param), to_apply=tcallb
+})";
+  ExpectHasSubstr(
+      Parse(original).status().error_message(),
+      "was parsing 8:39: error: instruction does not exist: aparam");
 }
 
 }  // namespace

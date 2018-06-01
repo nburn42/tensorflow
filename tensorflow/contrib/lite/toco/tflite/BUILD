@@ -54,6 +54,7 @@ cc_library(
         "types.h",
     ],
     deps = [
+        "//tensorflow/contrib/lite:string_util",
         "//tensorflow/contrib/lite/schema:schema_fbs",
         "//tensorflow/contrib/lite/toco:model",
     ],
@@ -136,16 +137,4 @@ tf_cc_test(
         "@com_google_googletest//:gtest_main",
         "@flatbuffers",
     ],
-)
-
-filegroup(
-    name = "all_files",
-    srcs = glob(
-        ["**/*"],
-        exclude = [
-            "**/METADATA",
-            "**/OWNERS",
-        ],
-    ),
-    visibility = ["//tensorflow:__subpackages__"],
 )

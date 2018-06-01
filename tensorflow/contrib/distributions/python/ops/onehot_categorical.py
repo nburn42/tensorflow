@@ -52,7 +52,7 @@ class OneHotCategorical(distribution.Distribution):
 
   #### Examples
 
-  Creates a 3-class distiribution, with the 2nd class, the most likely to be
+  Creates a 3-class distribution, with the 2nd class, the most likely to be
   drawn from.
 
   ```python
@@ -60,7 +60,7 @@ class OneHotCategorical(distribution.Distribution):
   dist = OneHotCategorical(probs=p)
   ```
 
-  Creates a 3-class distiribution, with the 2nd class the most likely to be
+  Creates a 3-class distribution, with the 2nd class the most likely to be
   drawn from, using logits.
 
   ```python
@@ -115,8 +115,8 @@ class OneHotCategorical(distribution.Distribution):
         more of the statistic's batch members are undefined.
       name: Python `str` name prefixed to Ops created by this class.
     """
-    parameters = locals()
-    with ops.name_scope(name, values=[logits, probs]):
+    parameters = dict(locals())
+    with ops.name_scope(name, values=[logits, probs]) as name:
       self._logits, self._probs = distribution_util.get_logits_and_probs(
           name=name, logits=logits, probs=probs, validate_args=validate_args,
           multidimensional=True)

@@ -24,12 +24,17 @@ limitations under the License.
 #include <vector>
 
 #include "tensorflow/core/common_runtime/device_factory.h"
+#include "tensorflow/core/common_runtime/device_mgr.h"
 #include "tensorflow/core/common_runtime/eager/eager_executor.h"
 #include "tensorflow/core/common_runtime/eager/kernel_and_device.h"
 #include "tensorflow/core/common_runtime/function.h"
 #include "tensorflow/core/common_runtime/rendezvous_mgr.h"
+#include "tensorflow/core/distributed_runtime/eager/eager_client.h"
+#include "tensorflow/core/distributed_runtime/rpc/grpc_server_lib.h"
 #include "tensorflow/core/framework/rendezvous.h"
 #include "tensorflow/core/lib/core/stringpiece.h"
+#include "tensorflow/core/lib/core/threadpool.h"
+#include "tensorflow/core/lib/gtl/flatmap.h"
 #include "tensorflow/core/lib/gtl/inlined_vector.h"
 #include "tensorflow/core/lib/gtl/map_util.h"
 #include "tensorflow/core/lib/gtl/stl_util.h"
@@ -43,22 +48,17 @@ namespace tensorflow {
 
 // Note: there's a copy enum in eager/c_api.h. It should be kept in sync.
 enum ContextDevicePlacementPolicy {
-  // Running operations with input tensors on the wrong device will fail. When
-  // soft placement is enabled acts like TFE_DEVICE_PLACEMENT_SILENT.
+  // Running operations with input tensors on the wrong device will fail.
   DEVICE_PLACEMENT_EXPLICIT = 0,
   // Copy the tensor to the right device but log a warning.
   DEVICE_PLACEMENT_WARN = 1,
-  // Silently copy the tensor, which has a performance cost since the
-  // operation will be blocked till the copy completes.
+  // Silently copy the tensor, which has a performance cost since the operation
+  // will be blocked till the copy completes. This is the default policy.
   DEVICE_PLACEMENT_SILENT = 2,
   // Default placement policy which silently copies int32 tensors but not other
-  // dtypes.  When soft placement is enabled acts like
-  // TFE_DEVICE_PLACEMENT_SILENT.
+  // dtypes.
   DEVICE_PLACEMENT_SILENT_FOR_INT32 = 3,
 };
-
-ContextDevicePlacementPolicy PlacementPolicy(
-    bool soft_placement, ContextDevicePlacementPolicy original_policy);
 
 class EagerContext {
  public:
@@ -66,6 +66,29 @@ class EagerContext {
                         ContextDevicePlacementPolicy default_policy, bool async,
                         std::unique_ptr<DeviceMgr> device_mgr,
                         Rendezvous* rendezvous);
+
+  // TODO(nareshmodi): Split this into 2 classes and hide functionality behind
+  // an interface. Alternatively, encapsulate remote state into a separate
+  // class/struct.
+  //
+  // Constructs an eager context that is able to communicate with remote
+  // workers.
+  //
+  // Additional remote-specific args are:
+  //  - server: A GrpcServer that exports the tensorflow.WorkerService. Note
+  //  that this class expects the server to already have been started.
+  //  - remote_eager_workers: A cache from which we can get "EagerClient"s to
+  //  communicate with remote eager services.
+  //  - remote_device_mgr: A DeviceMgr* which contains all remote devices
+  //  (should contain no local devices).
+  //  - remote_contexts: A map containing task name to remote context ID.
+  explicit EagerContext(
+      const SessionOptions& opts, ContextDevicePlacementPolicy default_policy,
+      bool async, DeviceMgr* local_device_mgr, Rendezvous* rendezvous,
+      std::unique_ptr<GrpcServer> server,
+      std::unique_ptr<eager::EagerClientCache> remote_eager_workers,
+      std::unique_ptr<DeviceMgr> remote_device_manager,
+      const gtl::FlatMap<string, uint64>& remote_contexts);
 
   ~EagerContext();
 
@@ -116,8 +139,6 @@ class EagerContext {
 
   Device* HostCPU() { return devices_[0]; }
 
-  bool SoftPlacement() { return soft_placement_; }
-
   uint64 NextId() { return executor_.NextId(); }
 
   void ExecutorAdd(EagerNode* node) { executor_.Add(node); }
@@ -134,10 +155,16 @@ class EagerContext {
 
   mutex* FunctionsMu() { return &functions_mu_; }
 
-  tensorflow::DeviceMgr* device_mgr() { return device_manager_.get(); }
+  const tensorflow::DeviceMgr* local_device_mgr() const {
+    return (local_device_manager_ != nullptr) ? local_device_manager_.get()
+                                              : local_unowned_device_manager_;
+  }
+  const tensorflow::DeviceMgr* remote_device_mgr() {
+    return remote_device_manager_.get();
+  }
 
   // TODO(apassos) remove the need for this
-  void ReleaseDeviceMgr() { device_manager_.release(); }
+  void ReleaseDeviceMgr() { local_device_manager_.release(); }
 
   // TODO(apassos) clean up RunMetadata storage.
   mutex* MetadataMu() { return &metadata_mu_; }
@@ -147,8 +174,12 @@ class EagerContext {
 
   FunctionLibraryDefinition* FuncLibDef() { return &func_lib_def_; }
 
+  Status GetClientAndContextID(Device* device, eager::EagerClient** client,
+                               uint64* context_id);
+
  private:
-  const bool soft_placement_;
+  void InitDeviceMapAndAsync();
+
   const ContextDevicePlacementPolicy policy_;
 
   // Note: we cannot use C++11 thread_local here as there is no concept of a
@@ -157,7 +188,10 @@ class EagerContext {
   std::unordered_map<std::thread::id, ContextDevicePlacementPolicy>
       thread_local_policies_ GUARDED_BY(policy_map_mu_);
 
-  std::unique_ptr<DeviceMgr> device_manager_;
+  // Only one of the below is set.
+  std::unique_ptr<DeviceMgr> local_device_manager_;
+  const DeviceMgr* local_unowned_device_manager_;
+
   // Devices owned by device_manager
   std::vector<Device*> devices_;
   // All devices are not owned.
@@ -167,6 +201,8 @@ class EagerContext {
   mutex functions_mu_;
   FunctionLibraryDefinition func_lib_def_ GUARDED_BY(functions_mu_){
       OpRegistry::Global(), {}};
+
+  std::unique_ptr<thread::ThreadPool> thread_pool_;
 
   // One FunctionLibraryRuntime per device.
   // func_libs[i] is the FunctionLibraryRuntime corresponding to
@@ -191,6 +227,17 @@ class EagerContext {
   mutable mutex async_map_mu_;
   std::unordered_map<std::thread::id, bool> thread_local_async_
       GUARDED_BY(async_map_mu_);
+
+  // The server_ is not const since we release it when the context is destroyed.
+  // Therefore the server_ object is not marked as const (even though it should
+  // be).
+  std::unique_ptr<GrpcServer> server_;
+  const std::unique_ptr<eager::EagerClientCache> remote_eager_workers_;
+  const std::unique_ptr<DeviceMgr> remote_device_manager_;
+
+  const gtl::FlatMap<string, uint64> remote_contexts_;
+  gtl::FlatMap<Device*, std::pair<eager::EagerClient*, uint64>>
+      device_to_client_cache_;
 };
 
 }  // namespace tensorflow

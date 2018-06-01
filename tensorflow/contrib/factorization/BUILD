@@ -215,6 +215,7 @@ tf_py_test(
         "//tensorflow/python:platform_test",
         "//tensorflow/python:sparse_tensor",
     ],
+    shard_count = 4,
 )
 
 # Estimators tests
@@ -346,17 +347,4 @@ cuda_py_test(
         "//tensorflow/python:variables",
     ],
     main = "python/kernel_tests/masked_matmul_benchmark.py",
-)
-
-# All files
-filegroup(
-    name = "all_files",
-    srcs = glob(
-        ["**/*"],
-        exclude = [
-            "**/METADATA",
-            "**/OWNERS",
-        ],
-    ),
-    visibility = ["//tensorflow:__subpackages__"],
 )

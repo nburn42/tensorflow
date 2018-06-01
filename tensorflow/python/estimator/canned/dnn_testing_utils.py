@@ -44,13 +44,13 @@ from tensorflow.python.ops import init_ops
 from tensorflow.python.ops import math_ops
 from tensorflow.python.ops import nn
 from tensorflow.python.ops import partitioned_variables
-from tensorflow.python.ops import state_ops
 from tensorflow.python.ops import variable_scope
 from tensorflow.python.ops import variables as variables_lib
 from tensorflow.python.platform import test
 from tensorflow.python.summary import summary as summary_lib
 from tensorflow.python.summary.writer import writer_cache
 from tensorflow.python.training import checkpoint_utils
+from tensorflow.python.training import distribute as distribute_lib
 from tensorflow.python.training import gradient_descent
 from tensorflow.python.training import monitored_session
 from tensorflow.python.training import optimizer as optimizer_lib
@@ -134,7 +134,7 @@ def mock_head(testcase, hidden_units, logits_dimension, expected_logits):
       hidden_weights_names + hidden_biases_names +
       [LOGITS_WEIGHTS_NAME + '/part_0:0', LOGITS_BIASES_NAME + '/part_0:0'])
 
-  def _create_estimator_spec(
+  def _create_tpu_estimator_spec(
       features, mode, logits, labels, train_op_fn=None, optimizer=None):
     del features, labels  # Not used.
     trainable_vars = ops.get_collection(ops.GraphKeys.TRAINABLE_VARIABLES)
@@ -149,19 +149,29 @@ def mock_head(testcase, hidden_units, logits_dimension, expected_logits):
           train_op = train_op_fn(loss)
         elif optimizer is not None:
           train_op = optimizer.minimize(loss, global_step=None)
-        return model_fn.EstimatorSpec(
+        return model_fn._TPUEstimatorSpec(
             mode=mode, loss=loss, train_op=train_op)
       elif mode == model_fn.ModeKeys.EVAL:
-        return model_fn.EstimatorSpec(mode=mode, loss=array_ops.identity(loss))
+        return model_fn._TPUEstimatorSpec(
+            mode=mode, loss=array_ops.identity(loss))
       elif mode == model_fn.ModeKeys.PREDICT:
-        return model_fn.EstimatorSpec(
+        return model_fn._TPUEstimatorSpec(
             mode=mode, predictions={'logits': array_ops.identity(logits)})
       else:
         testcase.fail('Invalid mode: {}'.format(mode))
 
+  def _create_estimator_spec(
+      features, mode, logits, labels, train_op_fn=None, optimizer=None):
+    tpu_spec = _create_tpu_estimator_spec(
+        features, mode, logits, labels, train_op_fn, optimizer)
+    return tpu_spec.as_estimator_spec()
+
   head = test.mock.NonCallableMagicMock(spec=head_lib._Head)
   head.logits_dimension = logits_dimension
-  head.create_estimator_spec = test.mock.MagicMock(wraps=_create_estimator_spec)
+  head._create_tpu_estimator_spec = test.mock.MagicMock(
+      wraps=_create_tpu_estimator_spec)
+  head.create_estimator_spec = test.mock.MagicMock(
+      wraps=_create_estimator_spec)
 
   return head
 
@@ -196,7 +206,7 @@ def mock_optimizer(testcase, hidden_units, expected_loss=None):
     testcase.assertEquals(0, loss.shape.ndims)
     if expected_loss is None:
       if global_step is not None:
-        return state_ops.assign_add(global_step, 1).op
+        return distribute_lib.increment_var(global_step)
       return control_flow_ops.no_op()
     assert_loss = assert_close(
         math_ops.to_float(expected_loss, name='expected'),
@@ -204,7 +214,7 @@ def mock_optimizer(testcase, hidden_units, expected_loss=None):
         name='assert_loss')
     with ops.control_dependencies((assert_loss,)):
       if global_step is not None:
-        return state_ops.assign_add(global_step, 1).op
+        return distribute_lib.increment_var(global_step)
       return control_flow_ops.no_op()
 
   optimizer_mock = test.mock.NonCallableMagicMock(

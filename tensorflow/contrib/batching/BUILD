@@ -96,6 +96,7 @@ py_test(
     name = "batch_ops_test",
     size = "small",
     srcs = ["python/ops/batch_ops_test.py"],
+    shard_count = 5,
     srcs_version = "PY2AND3",
     tags = [
         "manual",
@@ -111,15 +112,4 @@ py_test(
         "//tensorflow/python:gradients",
         "//tensorflow/python:script_ops",
     ],
-)
-
-filegroup(
-    name = "all_files",
-    srcs = glob(
-        ["**/*"],
-        exclude = [
-            "**/METADATA",
-            "**/OWNERS",
-        ],
-    ),
 )

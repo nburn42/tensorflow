@@ -45,17 +45,20 @@ limitations under the License.
 namespace tensorflow {
 
 // Associates a Tensor and a Device, used in the eager runtime. Internal version
-// executor_of the TFE_TensorHandle struct and the python EagerTensor class
+// of the TFE_TensorHandle struct and the python EagerTensor class
 // (unrelated to python TensorHandle).
 class TensorHandle : public core::RefCounted {
  public:
-  TensorHandle(const Tensor& t, Device* d, Device* op_device)
+  TensorHandle(const Tensor& t, Device* d, Device* op_device, EagerContext* ctx)
       : dtype(t.dtype()),
         node_id(0),
         tensor_(t),
         device_(d),
         op_device_(op_device),
-        ctx_(nullptr) {}
+        remote_op_id_(-1),
+        remote_output_num_(-1),
+        ctx_(ctx),
+        is_ready_(true) {}
 
   TensorHandle(uint64 node_id, DataType dtype, EagerContext* ctx)
       : dtype(dtype),
@@ -63,11 +66,35 @@ class TensorHandle : public core::RefCounted {
         tensor_(dtype),
         device_(nullptr),
         op_device_(nullptr),
-        ctx_(ctx) {
+        remote_op_id_(-1),
+        remote_output_num_(-1),
+        ctx_(ctx),
+        is_ready_(ctx == nullptr) {
     DCHECK_GT(node_id, 0);
   }
 
-  ~TensorHandle() override {}
+  // Remote tensor handle constructor.
+  TensorHandle(uint64 op_id, int32 output_num, DataType dtype,
+               std::function<void()> call_on_destroy, Device* d,
+               Device* op_device, EagerContext* ctx)
+      : dtype(dtype),
+        node_id(0),
+        device_(d),
+        op_device_(op_device),
+        remote_op_id_(op_id),
+        remote_output_num_(output_num),
+        call_on_destroy_(std::move(call_on_destroy)),
+        ctx_(ctx),
+        is_ready_(true) {
+    DCHECK(IsRemote()) << "Op ID and output num should be >= 0. Op ID: "
+                       << op_id << ", Output num: " << output_num;
+  }
+
+  ~TensorHandle() override {
+    if (call_on_destroy_) {
+      call_on_destroy_();
+    }
+  }
 
   Status Tensor(const tensorflow::Tensor** t);
 
@@ -79,6 +106,9 @@ class TensorHandle : public core::RefCounted {
                          tensorflow::Device** device,
                          tensorflow::Device** op_device);
 
+  // Return the op_id and output num if the handle refers to a remote tensor.
+  Status RemoteAddress(uint64* op_id, int32* output_num);
+
   // Note that this can be called at most once, and only on non-ready handles,
   // and makes them ready.
   void SetTensorAndDevice(const tensorflow::Tensor& tensor,
@@ -87,6 +117,12 @@ class TensorHandle : public core::RefCounted {
 
   Status CopyToDevice(EagerContext* ctx, tensorflow::Device* dstd,
                       TensorHandle** output);
+
+  // Warning: can return nullptr for CPU tensors.
+  EagerContext* Context() {
+    mutex_lock ml(ctx_mutex_);
+    return ctx_;
+  }
 
   // dtype for the handle. It must be the same as t.dtype() once the handle is
   // ready.
@@ -99,6 +135,8 @@ class TensorHandle : public core::RefCounted {
   Status WaitReady();
 
   bool IsReady();
+
+  bool IsRemote();
 
   // Id for the EagerNode that will compute the value pointed to by this handle.
   // If the value is 0, the handle is already ready, but not vice-versa.
@@ -120,12 +158,22 @@ class TensorHandle : public core::RefCounted {
   // device_ for constant tensors.
   tensorflow::Device* op_device_;
 
+  // IDs required when this class is representing a remote tensor handle.
+  const uint64 remote_op_id_;
+  const int32 remote_output_num_;
+
+  // A callback that is executed when the class is destroyed.
+  //
+  // This is currently used for remote tensor handles.
+  const std::function<void()> call_on_destroy_;
+
   mutex ctx_mutex_;
 
   // `ctx` is only guaranteed to be set if the handle is not "ready". This is
   // typically true when the handle was produced during async execution.
   // `ctx` object is not owned and should outlive this handle.
   EagerContext* ctx_ GUARDED_BY(ctx_mutex_);
+  bool is_ready_ GUARDED_BY(ctx_mutex_);
 };
 
 }  // namespace tensorflow

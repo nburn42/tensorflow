@@ -42,7 +42,6 @@ tf_cc_binary(
         "//conditions:default": [],
     }),
     deps = [
-        ":mutable_op_resolver",
         "//tensorflow/contrib/lite:framework",
         "//tensorflow/contrib/lite:string_util",
         "//tensorflow/contrib/lite/kernels:builtin_ops",
@@ -78,29 +77,13 @@ cc_test(
         "//tensorflow/contrib/lite:testdata/test_model.bin",
         "//tensorflow/contrib/lite:testdata/test_model_broken.bin",
     ],
+    tags = [
+        "tflite_not_portable_android",
+    ],
     deps = [
         ":gen_op_registration",
         "@com_google_googletest//:gtest",
     ],
-)
-
-cc_library(
-    name = "mutable_op_resolver",
-    srcs = ["mutable_op_resolver.cc"],
-    hdrs = ["mutable_op_resolver.h"],
-    deps = ["//tensorflow/contrib/lite:framework"],
-)
-
-filegroup(
-    name = "all_files",
-    srcs = glob(
-        ["**/*"],
-        exclude = [
-            "**/METADATA",
-            "**/OWNERS",
-        ],
-    ),
-    visibility = ["//tensorflow:__subpackages__"],
 )
 
 cc_library(
@@ -112,7 +95,6 @@ cc_library(
         "//tensorflow/contrib/lite:schema_fbs_version",
         "//tensorflow/contrib/lite:string_util",
         "//tensorflow/contrib/lite/schema:schema_fbs",
-        "@com_google_absl//absl/base:core_headers",
     ],
 )
 
@@ -124,11 +106,9 @@ cc_test(
         "tflite_not_portable",
     ],
     deps = [
-        ":mutable_op_resolver",
         ":verifier",
         "//tensorflow/contrib/lite:framework",
         "//tensorflow/contrib/lite:schema_fbs_version",
-        "//tensorflow/contrib/lite:string_util",
         "//tensorflow/contrib/lite/schema:schema_fbs",
         "//tensorflow/contrib/lite/testing:util",
         "//tensorflow/core:framework_lite",

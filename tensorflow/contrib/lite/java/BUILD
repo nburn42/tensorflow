@@ -1,7 +1,9 @@
 # Description:
 # TensorFlow Lite Java API.
 
-package(default_visibility = ["//visibility:private"])
+package(default_visibility = [
+    "//tensorflow/contrib/lite/java/ovic:__pkg__",
+])
 
 licenses(["notice"])  # Apache 2.0
 
@@ -100,6 +102,7 @@ java_test(
         "src/testdata/int64.bin",
         "src/testdata/invalid_model.bin",
         "src/testdata/uint8.bin",
+        "src/testdata/with_custom_op.lite",
     ],
     javacopts = JAVACOPTS,
     test_class = "org.tensorflow.lite.NativeInterpreterWrapperTest",
@@ -166,16 +169,4 @@ tflite_jni_binary(
     deps = [
         "//tensorflow/contrib/lite/java/src/main/native",
     ],
-)
-
-filegroup(
-    name = "all_files",
-    srcs = glob(
-        ["**/*"],
-        exclude = [
-            "**/METADATA",
-            "**/OWNERS",
-        ],
-    ),
-    visibility = ["//tensorflow:__subpackages__"],
 )

@@ -51,7 +51,7 @@ class InitializableLookupTable : public LookupInterface {
         "Insert not supported by InitializableLookupTable implementations");
   }
 
-  Status ExportValues(OpKernelContext* context) final {
+  Status ExportValues(OpKernelContext* context) {
     return errors::Unimplemented(
         "ExportValues not supported by InitializableLookupTable "
         "implementations");
@@ -92,6 +92,8 @@ class InitializableLookupTable : public LookupInterface {
   //
   // Then the iterator is exhausted, valid returns false and status returns
   // Status::OutOfRange.
+  //
+  // This class is Thread-unsafe.
   class InitTableIterator {
    public:
     InitTableIterator() {}
